@@ -1,3 +1,6 @@
+// Adam Harvey and Parker Hundley 
+// Assignment 2
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -5,6 +8,9 @@
 #include <netdb.h>
 #include "Practical.h"
 #include <getopt.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 
 int main(int argc, char *argv[]){
@@ -17,19 +23,23 @@ int main(int argc, char *argv[]){
     int server_mode = 0; // 0 means client mode
 
     int opt;
-    while ((opt = getopt(argc, argv, "cipsnS")) != -1) {
+    while ((opt = getopt(argc, argv, "c:i:p:s:nS")) != -1) {
         switch (opt) {
             case 'c':
                 ping_count = atoi(optarg);
+                fprintf(stderr, "Count: %d\n", ping_count);
                 break;
             case 'i':
                 ping_interval = atof(optarg);
+                fprintf(stderr, "Interval: %lf\n", ping_interval);
                 break;
             case 'p':
                 port_number = atoi(optarg);
+                fprintf(stderr, "Port: %d\n", port_number);
                 break;
             case 's':
                 data_size = atoi(optarg);
+                fprintf(stderr, "Size: %d\n", data_size);
                 break;
             case 'n':
                 no_print = 1; // Set the flag to print summary stats only
@@ -38,107 +48,90 @@ int main(int argc, char *argv[]){
                 server_mode = 1; // Set the flag to operate in server mode
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-c count] [-i interval] [-p port] [-s size] [-n] [-S]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
 
-    // Your code to use the parsed options goes here
-    // For example, you can print the values:
-    printf("Ping Count: %d\n", ping_count);
-    printf("Ping Interval: %lf\n", ping_interval);
-    printf("Port Number: %d\n", port_number);
-    printf("Data Size: %d\n", data_size);
-    printf("No Print: %s\n", no_print ? "True" : "False");
-    printf("Server Mode: %s\n", server_mode ? "True" : "False");
-
-
 if(server_mode){
 
- if (args < 3 || args > 4) // Test for correct number of arguments
-    DieWithUserMessage("Parameter(s)",
-        "<Server Address/Name> <Echo Word> [<Server Port/Service>]");
+  char server[6];
+  snprintf(server, sizeof(server), "%d", port_number);
 
-  char *server = params[1];     // First arg: server address/name
-  char *echoString = params[2]; // Second arg: word to echo
-
-  size_t echoStringLen = strlen(echoString);
-  if (echoStringLen > MAXSTRINGLENGTH) // Check input length
-    DieWithUserMessage(echoString, "string too long");
-
-  // Third arg (optional): server port/service
-  char *servPort = (args == 4) ? params[3] : "echo";
-
-  // Tell the system what kind(s) of address info we want
-  struct addrinfo addrCriteria;                   // Criteria for address match
+  // Construct the server address structure
+  struct addrinfo addrCriteria;                   // Criteria for address
   memset(&addrCriteria, 0, sizeof(addrCriteria)); // Zero out structure
   addrCriteria.ai_family = AF_UNSPEC;             // Any address family
-  // For the following fields, a zero value means "don't care"
-  addrCriteria.ai_socktype = SOCK_DGRAM;          // Only datagram sockets
-  addrCriteria.ai_protocol = IPPROTO_UDP;         // Only UDP protocol
+  addrCriteria.ai_flags = AI_PASSIVE;             // Accept on any address/port
+  addrCriteria.ai_socktype = SOCK_DGRAM;          // Only datagram socket
+  addrCriteria.ai_protocol = IPPROTO_UDP;         // Only UDP socket
 
-  // Get address(es)
   struct addrinfo *servAddr; // List of server addresses
-  int rtnVal = getaddrinfo(server, servPort, &addrCriteria, &servAddr);
+  int rtnVal = getaddrinfo(NULL, server, &addrCriteria, &servAddr);
   if (rtnVal != 0)
     DieWithUserMessage("getaddrinfo() failed", gai_strerror(rtnVal));
 
-  // Create a datagram/UDP socket
+  // Create socket for incoming connections
   int sock = socket(servAddr->ai_family, servAddr->ai_socktype,
-      servAddr->ai_protocol); // Socket descriptor for client
+      servAddr->ai_protocol);
   if (sock < 0)
     DieWithSystemMessage("socket() failed");
 
-  // Send the string to the server
-  ssize_t numBytes = sendto(sock, echoString, echoStringLen, 0,
-      servAddr->ai_addr, servAddr->ai_addrlen);
-  if (numBytes < 0)
-    DieWithSystemMessage("sendto() failed");
-  else if (numBytes != echoStringLen)
-    DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
+  // Bind to the local address
+  if (bind(sock, servAddr->ai_addr, servAddr->ai_addrlen) < 0)
+    DieWithSystemMessage("bind() failed");
 
-  // Receive a response
-  struct sockaddr_storage fromAddr; // Source address of server
-  // Set length of from address structure (in-out parameter)
-  socklen_t fromAddrLen = sizeof(fromAddr);
-  char buffer[MAXSTRINGLENGTH + 1]; // I/O buffer
-  numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
-      (struct sockaddr *) &fromAddr, &fromAddrLen);
-  if (numBytes < 0)
-    DieWithSystemMessage("recvfrom() failed");
-  else if (numBytes != echoStringLen)
-    DieWithUserMessage("recvfrom() error", "received unexpected number of bytes");
-
-  // Verify reception from expected source
-  if (!SockAddrsEqual(servAddr->ai_addr, (struct sockaddr *) &fromAddr))
-    DieWithUserMessage("recvfrom()", "received a packet from unknown source");
-
+  // Free address list allocated by getaddrinfo()
   freeaddrinfo(servAddr);
 
-  buffer[echoStringLen] = '\0';     // Null-terminate received data
-  printf("Received: %s\n", buffer); // Print the echoed string
+  for (;;) { // Run forever
+    struct sockaddr_storage clntAddr; // Client address
+    // Set Length of client address structure (in-out parameter)
+    socklen_t clntAddrLen = sizeof(clntAddr);
+
+    // Block until receive message from a client
+    char buffer[MAXSTRINGLENGTH]; // I/O buffer
+    // Size of received message
+    ssize_t numBytesRcvd = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
+        (struct sockaddr *) &clntAddr, &clntAddrLen);
+    if (numBytesRcvd < 0)
+      DieWithSystemMessage("recvfrom() failed");
+
+    fputs("Handling client ", stdout);
+    PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
+    fputc('\n', stdout);
+
+    // Send received datagram back to the client
+    ssize_t numBytesSent = sendto(sock, buffer, numBytesRcvd, 0,
+        (struct sockaddr *) &clntAddr, sizeof(clntAddr));
+    if (numBytesSent < 0)
+      DieWithSystemMessage("sendto() failed)");
+    else if (numBytesSent != numBytesRcvd)
+      DieWithUserMessage("sendto()", "sent unexpected number of bytes");
+  }
 
   close(sock);
   exit(0);
-
+ 
 }
 
 else{
 
+ if (optind < argc) {
+        server_ip_address = argv[optind];
+        fprintf(stderr, "Server IP Address: %s\n", server_ip_address);
+    } 
+    
+  char *echoString = argv[2]; // Second arg: word to echo
 
-    if (args < 3 || args > 4) // Test for correct number of arguments
-    DieWithUserMessage("Parameter(s)",
-        "<Server Address/Name> <Echo Word> [<Server Port/Service>]");
-
-  char *server = params[1];     // First arg: server address/name
-  char *echoString = params[2]; // Second arg: word to echo
+  char server[6];
+  snprintf(server, sizeof(server), "%d", port_number);
 
   size_t echoStringLen = strlen(echoString);
   if (echoStringLen > MAXSTRINGLENGTH) // Check input length
     DieWithUserMessage(echoString, "string too long");
 
   // Third arg (optional): server port/service
-  char *servPort = (args == 4) ? params[3] : "echo";
+  char *servPort = (argc == 4) ? argv[3] : "echo";
 
   // Tell the system what kind(s) of address info we want
   struct addrinfo addrCriteria;                   // Criteria for address match
@@ -192,7 +185,6 @@ else{
 
   close(sock);
   exit(0);
-
 
 }
 
