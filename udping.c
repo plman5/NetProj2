@@ -21,6 +21,7 @@ int main(int argc, char *argv[]){
     int data_size = 12;
     int no_print = 0; // 0 means print all
     int server_mode = 0; // 0 means client mode
+    char* server_ip_add = NULL;
 
     int opt;
     while ((opt = getopt(argc, argv, "c:i:p:s:nS")) != -1) {
@@ -108,17 +109,13 @@ if(server_mode){
     else if (numBytesSent != numBytesRcvd)
       DieWithUserMessage("sendto()", "sent unexpected number of bytes");
   }
-
-  close(sock);
-  exit(0);
- 
 }
 
 else{
 
  if (optind < argc) {
-        server_ip_address = argv[optind];
-        fprintf(stderr, "Server IP Address: %s\n", server_ip_address);
+        server_ip_add = argv[optind];
+        fprintf(stderr, "Server IP Address: %s\n", server_ip_add);
     } 
     
   char *echoString = argv[2]; // Second arg: word to echo
@@ -131,7 +128,7 @@ else{
     DieWithUserMessage(echoString, "string too long");
 
   // Third arg (optional): server port/service
-  char *servPort = (argc == 4) ? argv[3] : "echo";
+  char *servPort = server_ip_add;
 
   // Tell the system what kind(s) of address info we want
   struct addrinfo addrCriteria;                   // Criteria for address match
@@ -162,7 +159,6 @@ else{
     DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
 
   // Receive a response
-
   struct sockaddr_storage fromAddr; // Source address of server
   // Set length of from address structure (in-out parameter)
   socklen_t fromAddrLen = sizeof(fromAddr);
