@@ -147,25 +147,20 @@ void* receiverThreadFunction(void *data) {
     struct timespec sendTime;
 
     for (int i = 0; i < ping_count; i++) {
-        ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
-                                    servAddr->ai_addr, &fromAddrLen);
+
+        ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0, servAddr->ai_addr, &fromAddrLen);
 
         if (numBytes < 0) {
             DieWithSystemMessage("recvfrom() failed");
         } else {
+
             buffer[numBytes] = '\0';
-            printf("Received: %s\n", buffer);
 
-           clock_gettime(CLOCK_MONOTONIC, &receiveTime);
+            clock_gettime(CLOCK_MONOTONIC, &receiveTime);
 
-
+  printf("I get here\n");
 long long rtt = (receiveTime.tv_sec - sendTime.tv_sec) * 1000000LL +
                             (receiveTime.tv_nsec - sendTime.tv_nsec) / 1000LL;
-
-	printf("Hello World\n");
-	printf("Ping Number: %d, Size: %d, Round Trip Time (ms): %lld\n",
-               threadData->received_pings, threadData->dataSize, rtt);
-
 
             if (rtt < threadData->min_rtt) {
                 threadData->min_rtt = rtt;
@@ -203,19 +198,19 @@ int main(int argc, char *argv[]){
         switch (opt) {
             case 'c':
                 ping_count = atoi(optarg);
-		fprintf(stderr, "Count: %d\n", ping_count);
+		fprintf(stderr, "Count %d\n", ping_count);
                 break;
             case 'i':
                 ping_interval = atof(optarg);
-		fprintf(stderr, "Interval: %lf\n", ping_interval);
+		fprintf(stderr, "Interval %.3lf\n", ping_interval);
                 break;
             case 'p':
 		port_number = atoi(optarg);
-		fprintf(stderr, "Port: %d\n", port_number);
+		fprintf(stderr, "Port %d\n", port_number);
 	        break;
             case 's':
                 data_size = atoi(optarg);
-		fprintf(stderr, "Size: %d\n", data_size);
+		fprintf(stderr, "Size %d\n", data_size);
                 break;
             case 'n':
                 no_print = 1; // Set the flag to print summary stats only
@@ -311,10 +306,27 @@ else{
 
  if (optind < argc) {
         server_ip_add = argv[optind];
-        fprintf(stderr, "Server IP Address: %s\n", server_ip_add);
+        fprintf(stderr, "Server_ip %s\n", server_ip_add);
     } else {
         fprintf(stderr, "Server IP Address is required.\n");
         exit(EXIT_FAILURE);
+    }
+
+
+    if(no_print){
+
+     printf("**********\n");
+
+    }
+    else{
+    for(int i = 1; i < ping_count + 1; i++){
+
+
+    printf("%5d %d \n", i, data_size);
+
+
+        }
+
     }
 
   //char server[6];
@@ -353,6 +365,17 @@ else{
 
     pthread_join(senderThread, NULL);
     pthread_join(receiverThread, NULL);
+
+/*
+    for(int i = 1; i < ping_count + 1; i++){
+
+
+    printf("%d %d \n", ping_count, data_size);
+
+
+}
+*/
+
 
     return 0;
 }
