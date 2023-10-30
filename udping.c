@@ -9,11 +9,22 @@
 #include <pthread.h>
 #include <signal.h>
 #include <time.h>
+#include <errno.h>
+
+volatile sig_atomic_t ctrlc_pressed = 0;
+
+void handle_sigint(int signum){
+
+
+if(signum == SIGINT){ctrlc_pressed = 1;}
+
+}
 
 struct ThreadData {
 
 int ping_count;
 int received_pings;
+int dataSize;
 struct timespec start_time;
 long long min_rtt;
 long long max_rtt;
@@ -68,31 +79,40 @@ void *senderThreadFunction(void *data) {
     char echoString[MAXSTRINGLENGTH];
     size_t echoStringLen;
 
-    for (int i = 0; i < ping_count; i++) {
-        // Construct the ping message (you can customize this part)
-        snprintf(echoString, sizeof(echoString), "Ping %d", i + 1);
-        echoStringLen = strlen(echoString);
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    struct timespec nextPingTime;
 
-        // Send the ping message
-        ssize_t numBytes = sendto(sock, echoString, echoStringLen, 0,
-                                  servAddr->ai_addr, servAddr->ai_addrlen);
 
-        if (numBytes < 0) {
-            DieWithSystemMessage("sendto() failed");
-        } else if (numBytes != echoStringLen) {
-            DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
+
+for (int i = 0; i < ping_count; i++) {
+        // Calculate the time to send the next ping
+        struct timespec nextPingTime;
+        nextPingTime.tv_sec = threadData->start_time.tv_sec + (i * ping_interval);
+        nextPingTime.tv_nsec = threadData->start_time.tv_nsec;
+
+        // Wait for the next ping time
+        pthread_mutex_lock(&mutex);
+        int result = pthread_cond_timedwait(&cond, &mutex, &nextPingTime);
+        pthread_mutex_unlock(&mutex);
+
+        if (result == ETIMEDOUT) {
+            // It's time to send the ping
+            snprintf(echoString, sizeof(echoString), "Ping %d", i + 1);
+            echoStringLen = strlen(echoString);
+
+            // Send the ping message
+            ssize_t numBytes = sendto(sock, echoString, echoStringLen, 0,
+                                      servAddr->ai_addr, servAddr->ai_addrlen);
+
+            if (numBytes < 0) {
+                DieWithSystemMessage("sendto() failed");
+            } else if (numBytes != echoStringLen) {
+                DieWithUserMessage("sendto() error", "sent an unexpected number of bytes");
+            }
+
+            threadData->received_pings++;
         }
-
-        // Sleep for the specified ping interval
-        if (i < ping_count - 1) {
-            struct timespec sleepTime;
-            sleepTime.tv_sec = (time_t)ping_interval;
-            sleepTime.tv_nsec = (long)((ping_interval - (time_t)ping_interval) * 1e9);
-
-            nanosleep(&sleepTime, NULL);
-        }
-
-        threadData->received_pings++;
     }
 
     freeaddrinfo(servAddr);
@@ -123,6 +143,9 @@ void* receiverThreadFunction(void *data) {
     char buffer[MAXSTRINGLENGTH + 1];
     socklen_t fromAddrLen;
 
+    struct timespec receiveTime;
+    struct timespec sendTime;
+
     for (int i = 0; i < ping_count; i++) {
         ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
                                     servAddr->ai_addr, &fromAddrLen);
@@ -133,6 +156,27 @@ void* receiverThreadFunction(void *data) {
             buffer[numBytes] = '\0';
             printf("Received: %s\n", buffer);
 
+           clock_gettime(CLOCK_MONOTONIC, &receiveTime);
+
+
+long long rtt = (receiveTime.tv_sec - sendTime.tv_sec) * 1000000LL +
+                            (receiveTime.tv_nsec - sendTime.tv_nsec) / 1000LL;
+
+	printf("Hello World\n");
+	printf("Ping Number: %d, Size: %d, Round Trip Time (ms): %lld\n",
+               threadData->received_pings, threadData->dataSize, rtt);
+
+
+            if (rtt < threadData->min_rtt) {
+                threadData->min_rtt = rtt;
+            }
+            if (rtt > threadData->max_rtt) {
+                threadData->max_rtt = rtt;
+            }
+            threadData->sum_rtt += rtt;
+            threadData->received_pings++;
+
+
         }
     }
 
@@ -142,8 +186,9 @@ void* receiverThreadFunction(void *data) {
     exit(0);
 }
 
-
 int main(int argc, char *argv[]){
+
+ signal(SIGINT,handle_sigint);
 
     int ping_count = 0x7fffffff;
     double ping_interval = 1.0;
@@ -190,6 +235,7 @@ threadData.ping_count = ping_count;
 threadData.ping_interval = ping_interval;
 threadData.port_number = port_number;
 threadData.server_ip_add = server_ip_add;
+threadData.dataSize = data_size;
 
   pthread_t senderThread, receiverThread;
 
@@ -243,9 +289,10 @@ if(server_mode){
     if (numBytesRcvd < 0)
       DieWithSystemMessage("recvfrom() failed");
 
-    // fputs("Handling client ", stdout);
-    // PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
-    // fputc('\n', stdout);
+
+    fputs("Handling client ", stdout);
+    PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
+    fputc('\n', stdout);
 
     // Send received datagram back to the client
     ssize_t numBytesSent = sendto(sock, buffer, numBytesRcvd, 0,
@@ -270,12 +317,16 @@ else{
         exit(EXIT_FAILURE);
     }
 
-  
+  //char server[6];
+  //snprintf(server, sizeof(server), "%d", port_number);
 
   char servPort[6];
   snprintf(servPort, sizeof(servPort), "%d", port_number);
 
   char* server = server_ip_add;
+
+  // Third arg (optional): server port/service
+  //char *servPort = server_ip_add;
 
   // Tell the system what kind(s) of address info we want
   struct addrinfo addrCriteria;                   // Criteria for address match
@@ -290,7 +341,6 @@ else{
   int rtnVal = getaddrinfo(server, servPort, &addrCriteria, &servAddr);
   if (rtnVal != 0)
     DieWithUserMessage("getaddrinfo() failed", gai_strerror(rtnVal));
-
 
        if (pthread_create(&senderThread, NULL, senderThreadFunction, &threadData) != 0) {
             DieWithSystemMessage("pthread_create(senderThread) failed");
