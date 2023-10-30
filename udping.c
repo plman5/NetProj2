@@ -26,6 +26,7 @@ int ping_count;
 int received_pings;
 int dataSize;
 struct timespec start_time;
+struct timespec sendTime;
 long long min_rtt;
 long long max_rtt;
 long long sum_rtt;
@@ -83,13 +84,15 @@ void *senderThreadFunction(void *data) {
     pthread_cond_t cond;
     struct timespec nextPingTime;
 
-
-
-for (int i = 0; i < ping_count; i++) {
+    for (int i = 0; i < ping_count; i++) {
         // Calculate the time to send the next ping
         struct timespec nextPingTime;
         nextPingTime.tv_sec = threadData->start_time.tv_sec + (i * ping_interval);
         nextPingTime.tv_nsec = threadData->start_time.tv_nsec;
+
+	struct timespec sendTime;
+	clock_gettime(CLOCK_MONOTONIC, &sendTime);
+
 
         // Wait for the next ping time
         pthread_mutex_lock(&mutex);
@@ -141,13 +144,17 @@ void* receiverThreadFunction(void *data) {
     }
 
     char buffer[MAXSTRINGLENGTH + 1];
-    socklen_t fromAddrLen;
+    socklen_t fromAddrLen = sizeof(struct sockaddr_storage);
 
     struct timespec receiveTime;
     struct timespec sendTime;
 
     for (int i = 0; i < ping_count; i++) {
 
+
+        clock_gettime(CLOCK_MONOTONIC, &receiveTime);
+
+	printf("HI\n");
         ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0, servAddr->ai_addr, &fromAddrLen);
 
         if (numBytes < 0) {
@@ -156,11 +163,8 @@ void* receiverThreadFunction(void *data) {
 
             buffer[numBytes] = '\0';
 
-            clock_gettime(CLOCK_MONOTONIC, &receiveTime);
-
-  printf("I get here\n");
-long long rtt = (receiveTime.tv_sec - sendTime.tv_sec) * 1000000LL +
-                            (receiveTime.tv_nsec - sendTime.tv_nsec) / 1000LL;
+long long rtt = (receiveTime.tv_sec - threadData->sendTime.tv_sec) * 1000000LL +
+                            (receiveTime.tv_nsec - threadData->sendTime.tv_nsec) / 1000LL;
 
             if (rtt < threadData->min_rtt) {
                 threadData->min_rtt = rtt;
@@ -170,8 +174,6 @@ long long rtt = (receiveTime.tv_sec - sendTime.tv_sec) * 1000000LL +
             }
             threadData->sum_rtt += rtt;
             threadData->received_pings++;
-
-
         }
     }
 
@@ -375,6 +377,17 @@ else{
 
 }
 */
+
+
+
+
+
+
+
+
+
+
+
 
 
     return 0;
