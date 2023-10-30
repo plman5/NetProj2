@@ -24,35 +24,122 @@ char* server_ip_add;
 
 };
 
-volatile sig_atomic_t interrupted = 0;
+int getServerAddress(const char *server_ip_add, int port_number, struct addrinfo **servAddr) {
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
 
-void sigint_handler(int signum){interrupted = 1;}
+    hints.ai_family = AF_UNSPEC;     // Allow both IPv4 and IPv6
+    hints.ai_socktype = SOCK_DGRAM;  // Datagram socket (UDP)
 
-void *senderThreadFunction(void *data) {
-struct ThreadData *threadData = (struct ThreadData *)data;
-    
+    // Convert the port number to a string
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%d", port_number);
 
+    int result = getaddrinfo(server_ip_add, port_str, &hints, servAddr);
+    if (result != 0) {
+        fprintf(stderr, "getaddrinfo() failed: %s\n", gai_strerror(result));
+        return -1;
+    }
 
-
-
-
-
-
-
-
-
-
-
+    return 0;
 }
 
-void *receiverThreadFunction(void *data) {
-struct ThreadData *threadData = (struct ThreadData *)data;
-   
+void *senderThreadFunction(void *data) {
 
+    struct ThreadData *threadData = (struct ThreadData *)data;
+    int ping_count = threadData->ping_count;
+    char *server_ip_add = threadData->server_ip_add;
+    int port_number = threadData->port_number;
+    double ping_interval = threadData->ping_interval;
 
+    struct addrinfo *servAddr;
+    if (getServerAddress(server_ip_add, port_number, &servAddr) != 0) {
+        fprintf(stderr, "Error getting server address\n");
+        exit(1);
+    }
 
+    int sock = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
 
+    if (sock < 0) {
+        DieWithSystemMessage("socket() failed");
+        exit(1);
+    }
 
+    char echoString[MAXSTRINGLENGTH];
+    size_t echoStringLen;
+
+    for (int i = 0; i < ping_count; i++) {
+        // Construct the ping message (you can customize this part)
+        snprintf(echoString, sizeof(echoString), "Ping %d", i + 1);
+        echoStringLen = strlen(echoString);
+
+        // Send the ping message
+        ssize_t numBytes = sendto(sock, echoString, echoStringLen, 0,
+                                  servAddr->ai_addr, servAddr->ai_addrlen);
+
+        if (numBytes < 0) {
+            DieWithSystemMessage("sendto() failed");
+        } else if (numBytes != echoStringLen) {
+            DieWithUserMessage("sendto() error", "sent unexpected number of bytes");
+        }
+
+        // Sleep for the specified ping interval
+        if (i < ping_count - 1) {
+            struct timespec sleepTime;
+            sleepTime.tv_sec = (time_t)ping_interval;
+            sleepTime.tv_nsec = (long)((ping_interval - (time_t)ping_interval) * 1e9);
+
+            nanosleep(&sleepTime, NULL);
+        }
+
+        threadData->received_pings++;
+    }
+
+    freeaddrinfo(servAddr);
+    close(sock);
+
+    exit(1);
+}
+
+void* receiverThreadFunction(void *data) {
+
+    struct ThreadData *threadData = (struct ThreadData *)data;
+    int ping_count = threadData->ping_count;
+    int port_number = threadData->port_number;
+
+    struct addrinfo *servAddr;
+    if (getServerAddress(NULL, port_number, &servAddr) != 0) {
+        fprintf(stderr, "Error getting server address\n");
+        exit(1);
+    }
+
+    int sock = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
+
+    if (sock < 0) {
+        DieWithSystemMessage("socket() failed");
+        exit(1);
+    }
+
+    char buffer[MAXSTRINGLENGTH + 1];
+    socklen_t fromAddrLen;
+
+    for (int i = 0; i < ping_count; i++) {
+        ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0,
+                                    servAddr->ai_addr, &fromAddrLen);
+
+        if (numBytes < 0) {
+            DieWithSystemMessage("recvfrom() failed");
+        } else {
+            buffer[numBytes] = '\0';
+            printf("Received: %s\n", buffer);
+
+        }
+    }
+
+    freeaddrinfo(servAddr);
+    close(sock);
+
+    exit(0);
 }
 
 
@@ -97,28 +184,14 @@ int main(int argc, char *argv[]){
         }
     }
 
-
-struct sigaction sa;
-sa.sa_handler = sigint_handler;
-sigemptyset(&sa.sa_mask);
-sa.sa_flags = 0;
-
-if(sigaction(SIGINT, &sa, NULL) == -1){
-
-perror("sigaction");
-exit(EXIT_FAILURE);
-
-}
-
-
-
 struct ThreadData threadData;
-pthread_t senderThread, receiverThread;
 
 threadData.ping_count = ping_count;
 threadData.ping_interval = ping_interval;
 threadData.port_number = port_number;
 threadData.server_ip_add = server_ip_add;
+
+  pthread_t senderThread, receiverThread;
 
 if(server_mode){
 
@@ -130,8 +203,6 @@ if(server_mode){
   
   char service[6];
   snprintf(service, sizeof(service), "%d", port_number);
-
-
 
   // Construct the server address structure
   struct addrinfo addrCriteria;                   // Criteria for address
@@ -199,17 +270,12 @@ else{
         exit(EXIT_FAILURE);
     }
 
-  char server[6];
-  snprintf(server, sizeof(server), "%d", port_number);
+  
 
-  char *echoString = argv[2]; // Second arg: word to echo
+  char servPort[6];
+  snprintf(servPort, sizeof(servPort), "%d", port_number);
 
-  size_t echoStringLen = strlen(echoString);
-  if (echoStringLen > MAXSTRINGLENGTH) // Check input length
-    DieWithUserMessage(echoString, "string too long");
-
-  // Third arg (optional): server port/service
-  char *servPort = server_ip_add;
+  char* server = server_ip_add;
 
   // Tell the system what kind(s) of address info we want
   struct addrinfo addrCriteria;                   // Criteria for address match
