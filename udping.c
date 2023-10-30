@@ -11,6 +11,9 @@
 #include <time.h>
 #include <errno.h>
 
+pthread_mutex_t mutex;
+pthread_cond_t cond;
+
 volatile sig_atomic_t ctrlc_pressed = 0;
 
 void handle_sigint(int signum){
@@ -79,9 +82,6 @@ void *senderThreadFunction(void *data) {
 
     char echoString[MAXSTRINGLENGTH];
     size_t echoStringLen;
-
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
     struct timespec nextPingTime;
 
     for (int i = 0; i < ping_count; i++) {
@@ -91,8 +91,7 @@ void *senderThreadFunction(void *data) {
         nextPingTime.tv_nsec = threadData->start_time.tv_nsec;
 
 	struct timespec sendTime;
-	clock_gettime(CLOCK_MONOTONIC, &sendTime);
-
+	clock_gettime(CLOCK_MONOTONIC, &threadData->sendTime);
 
         // Wait for the next ping time
         pthread_mutex_lock(&mutex);
@@ -151,19 +150,19 @@ void* receiverThreadFunction(void *data) {
 
     for (int i = 0; i < ping_count; i++) {
 
-
         clock_gettime(CLOCK_MONOTONIC, &receiveTime);
 
-	printf("HI\n");
-        ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0, servAddr->ai_addr, &fromAddrLen);
+       ssize_t numBytes = recvfrom(sock, buffer, MAXSTRINGLENGTH, 0, servAddr->ai_addr, &fromAddrLen);
 
-        if (numBytes < 0) {
-            DieWithSystemMessage("recvfrom() failed");
-        } else {
+       // if (numBytes < 0) {
+         //   DieWithSystemMessage("recvfrom() failed");
+        //}
+        //else {
 
-            buffer[numBytes] = '\0';
+//            buffer[numBytes] = '\0';
 
-long long rtt = (receiveTime.tv_sec - threadData->sendTime.tv_sec) * 1000000LL +
+/*
+           long long rtt = (receiveTime.tv_sec - threadData->sendTime.tv_sec) * 1000000LL +
                             (receiveTime.tv_nsec - threadData->sendTime.tv_nsec) / 1000LL;
 
             if (rtt < threadData->min_rtt) {
@@ -172,10 +171,15 @@ long long rtt = (receiveTime.tv_sec - threadData->sendTime.tv_sec) * 1000000LL +
             if (rtt > threadData->max_rtt) {
                 threadData->max_rtt = rtt;
             }
-            threadData->sum_rtt += rtt;
-            threadData->received_pings++;
-        }
-    }
+
+*/
+//            threadData->sum_rtt += rtt;
+  //          threadData->received_pings++;
+       // }
+
+
+
+  }
 
     freeaddrinfo(servAddr);
     close(sock);
@@ -285,12 +289,6 @@ if(server_mode){
         (struct sockaddr *) &clntAddr, &clntAddrLen);
     if (numBytesRcvd < 0)
       DieWithSystemMessage("recvfrom() failed");
-
-
-    fputs("Handling client ", stdout);
-    PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
-    fputc('\n', stdout);
-
     // Send received datagram back to the client
     ssize_t numBytesSent = sendto(sock, buffer, numBytesRcvd, 0,
         (struct sockaddr *) &clntAddr, sizeof(clntAddr));
@@ -367,28 +365,6 @@ else{
 
     pthread_join(senderThread, NULL);
     pthread_join(receiverThread, NULL);
-
-/*
-    for(int i = 1; i < ping_count + 1; i++){
-
-
-    printf("%d %d \n", ping_count, data_size);
-
-
-}
-*/
-
-
-
-
-
-
-
-
-
-
-
-
 
     return 0;
 }
