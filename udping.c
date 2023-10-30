@@ -243,9 +243,9 @@ if(server_mode){
     if (numBytesRcvd < 0)
       DieWithSystemMessage("recvfrom() failed");
 
-    fputs("Handling client ", stdout);
-    PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
-    fputc('\n', stdout);
+    // fputs("Handling client ", stdout);
+    // PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
+    // fputc('\n', stdout);
 
     // Send received datagram back to the client
     ssize_t numBytesSent = sendto(sock, buffer, numBytesRcvd, 0,
